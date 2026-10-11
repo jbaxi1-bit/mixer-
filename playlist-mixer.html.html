@@ -103,7 +103,7 @@ body{padding-top:calc(20px + env(safe-area-inset-top,0px))}
 
 /* Phone layout: playlist first, decks stacked, mixer pinned to the bottom edge */
 @media(max-width:999px){
-  body{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))}
+  body{padding-bottom:calc(270px + env(safe-area-inset-bottom,0px))}
   input[type=text],input[type=password],input[type=number],select{font-size:16px;min-height:44px}
   button{min-height:44px}
   input[type=range]{height:34px}
@@ -132,7 +132,16 @@ body{padding-top:calc(20px + env(safe-area-inset-top,0px))}
   .fadebox .label{display:none}
   .fadebox select{flex:0 0 38%}
   .fadebox button{flex:1}
+  .autobox .label{display:none}
+  .autorow{grid-template-columns:repeat(3,1fr)}
+  body.ios{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))}
 }
+.autorow{display:grid;grid-template-columns:1fr;gap:6px}
+.autorow select{min-width:0;width:100%;padding-left:8px;padding-right:6px}
+.ios #fadeDur{display:none}
+@keyframes pulse{50%{box-shadow:0 0 0 7px rgba(235,232,225,.28)}}
+button.pulse{animation:pulse 1s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){button.pulse{animation:none;outline:3px solid var(--fg)}}
 </style>
 </head>
 <body>
@@ -147,7 +156,7 @@ body{padding-top:calc(20px + env(safe-area-inset-top,0px))}
   </header>
   <div id="status">Paste your playlist link and press Load playlist. The playlist must be public or unlisted.</div>
   <div id="iosNote" hidden>
-    iPhone and iPad do not let web pages change a video's volume, and they may stop one deck when the other starts. The crossfader is hidden here. Use Hand off: it starts the other deck and pauses this one after the fade time, so you can still blend by ear with the speed controls and your volume buttons.
+    iPhone and iPad do not let web pages change a video's volume, and they may stop one deck when the other starts. The crossfader is hidden here. Hand off is a quick cut: it starts the other deck at its cue point and stops this one. Turn on Auto-advance to have the next track load and start by itself. Tap Hand off once yourself first, so your iPhone lets deck B start on its own. Keep the screen on, because locking it stops playback.
   </div>
   <div class="banner" id="fileBanner" hidden>
     You opened this as a file. If a deck shows a video error, run <code>python3 -m http.server 8000</code> in this folder and open <code>http://localhost:8000/playlist-mixer.html</code> instead.
@@ -182,6 +191,26 @@ body{padding-top:calc(20px + env(safe-area-inset-top,0px))}
           <option value="64">64 seconds</option>
         </select>
         <button id="fadeBtn" class="primary">Fade to B</button>
+      </div>
+      <div class="stack autobox">
+        <span class="label">Auto-advance</span>
+        <div class="autorow">
+          <select id="autoMode" aria-label="Auto-advance mode">
+            <option value="off">Auto off</option>
+            <option value="order">In order</option>
+            <option value="shuffle">Shuffle</option>
+          </select>
+          <select id="autoLead" aria-label="When to move to the next track">
+            <option value="0">At end</option>
+            <option value="10">Last 10s</option>
+            <option value="20">Last 20s</option>
+            <option value="30">Last 30s</option>
+          </select>
+          <select id="startAt" aria-label="Where the next track starts">
+            <option value="cue">From cue</option>
+            <option value="0">From top</option>
+          </select>
+        </div>
       </div>
       <div class="gains hint" style="flex-direction:column;gap:2px">
         <span>Left / Right arrows move the crossfader.</span>
@@ -256,7 +285,9 @@ function applyVols(){
   var g=gains();
   $('#gA').textContent='A '+Math.round(g[0]*100)+'%';
   $('#gB').textContent='B '+Math.round(g[1]*100)+'%';
-  $('#fadeBtn').textContent=(IOS?'Hand off to ':'Fade to ')+(cross<0.5?'B':'A');
+  var fb=$('#fadeBtn');
+  fb.textContent=pendingDest!==null?('Start deck '+(pendingDest?'B':'A')):((IOS?'Hand off to ':'Fade to ')+(defaultDest()?'B':'A'));
+  fb.classList.toggle('pulse',pendingDest!==null);
   if(IOS) return;
   decks.forEach(function(d,i){
     if(!d.ready) return;
@@ -273,26 +304,109 @@ document.addEventListener('keydown',function(e){
   if(e.key==='ArrowLeft'){setCross(cross-0.05);e.preventDefault()}
   if(e.key==='ArrowRight'){setCross(cross+0.05);e.preventDefault()}
 });
-$('#fadeBtn').addEventListener('click',function(){
-  var dest=cross<0.5?1:0,from=cross,dur=+$('#fadeDur').value*1000,t0=performance.now();
-  var td=decks[dest];
-  if(td&&td.ready&&td.vid){try{if(td.p.getPlayerState()!==1)td.p.playVideo()}catch(e){}}
+/* ---------- transitions and auto-advance ---------- */
+var autoMode='off',autoLead=0,qIndex=-1,pendingDest=null,tickN=0;
+function pstate(d){try{return d&&d.ready?d.p.getPlayerState():-9}catch(e){return -9}}
+function isPlaying(d){return pstate(d)===1}
+function busy(d){var s=pstate(d);return s===1||s===3}
+function defaultDest(){
+  var pl=decks.filter(isPlaying);
+  if(pl.length===1)return 1-pl[0].i;
+  return cross<0.5?1:0;
+}
+function pickNext(){
+  if(!tracks.length)return -1;
+  var ok=[];
+  tracks.forEach(function(t,i){if(!t.bad)ok.push(i)});
+  if(!ok.length)return -1;
+  var onDecks=decks.map(function(d){return d.vid});
+  if(autoMode==='shuffle'){
+    var pool=ok.filter(function(i){return onDecks.indexOf(tracks[i].id)<0});
+    if(!pool.length)pool=ok;
+    return pool[Math.floor(Math.random()*pool.length)];
+  }
+  for(var k=1;k<=tracks.length;k++){
+    var i=(qIndex+k)%tracks.length;
+    if(!tracks[i].bad&&onDecks.indexOf(tracks[i].id)<0)return i;
+  }
+  return ok[0];
+}
+function ensureQueued(){
+  if(autoMode==='off'||!tracks.length)return;
+  var cur=decks.filter(function(d){return isPlaying(d)&&!d.handed})[0];
+  if(!cur)return;
+  var o=decks[1-cur.i];
+  if(!o||!o.ready||busy(o))return;
+  if(o.vid&&!(o.handed||pstate(o)===0))return;   // keep a track the person loaded and has not played
+  var n=pickNext();if(n<0)return;
+  loadTrack(o.i,tracks[n]);
+  status('Auto-advance: deck '+(o.i?'B':'A')+' is queued with '+(tracks[n].title||'the next track')+'.');
+}
+function transition(dest,auto){
+  var to=decks[dest],from=decks[1-dest];
+  if(!to||!to.ready||!from)return;
+  from.handed=true;to.handed=false;
+  if(!to.vid){
+    var n=pickNext();
+    if(n<0){status('Load a track onto the other deck first.');return}
+    loadTrack(dest,tracks[n]);
+  }
+  var startAt=$('#startAt').value==='cue'?to.cue:0;
   cancelAnimationFrame(fadeRaf);
+  try{if(startAt>0||pstate(to)===0)to.p.seekTo(startAt,true)}catch(e){}
   if(IOS){
-    // No volume control on iOS: start the other deck, then pause this one when the fade time is up.
-    var od=decks[1-dest];
-    cross=dest;applyVols();
-    if(od&&od.ready){setTimeout(function(){try{od.p.pauseVideo()}catch(e){}},dur)}
-    status('Deck '+(dest?'B':'A')+' started. Deck '+(dest?'A':'B')+' pauses in '+Math.round(dur/1000)+' seconds.');
+    // No volume control on iOS, so this is a cut: start the next deck, stop this one.
+    cross=dest;pendingDest=null;
+    try{to.p.playVideo()}catch(e){}
+    setTimeout(function(){try{if(isPlaying(from))from.p.pauseVideo()}catch(e){}},350);
+    setTimeout(function(){
+      if(!busy(to)){
+        pendingDest=dest;
+        status('Your iPhone blocked the automatic start. Tap the big button to start deck '+(dest?'B':'A')+'.',true);
+        applyVols();
+      }
+    },1800);
+    applyVols();
     return;
   }
+  try{if(!isPlaying(to))to.p.playVideo()}catch(e){}
+  var dur=+$('#fadeDur').value*1000,t0=performance.now(),from0=cross;
   function step(now){
     var k=Math.min(1,(now-t0)/dur);
-    setCross(from+(dest-from)*k);
+    setCross(from0+(dest-from0)*k);
     if(k<1)fadeRaf=requestAnimationFrame(step);
+    else if(auto){try{from.p.pauseVideo()}catch(e){}}
   }
   fadeRaf=requestAnimationFrame(step);
+}
+$('#fadeBtn').addEventListener('click',function(){
+  if(pendingDest!==null){
+    var d=pendingDest;pendingDest=null;applyVols();
+    transition(d,false);
+    return;
+  }
+  transition(defaultDest(),false);
 });
+$('#autoMode').addEventListener('change',function(){
+  autoMode=this.value;store.set('autoMode',autoMode);
+  if(autoMode==='off'){status('Auto-advance is off.')}
+  else{status('Auto-advance is on. Press Play on a deck and the next track queues itself.');ensureQueued()}
+});
+$('#autoLead').addEventListener('change',function(){autoLead=+this.value;store.set('autoLead',this.value)});
+$('#startAt').addEventListener('change',function(){store.set('startAt',this.value)});
+function autoTick(){
+  tickN++;
+  if(pendingDest!==null&&isPlaying(decks[pendingDest])){pendingDest=null;applyVols()}
+  if(autoMode==='off')return;
+  if(tickN%4===0)ensureQueued();
+  var a=decks.filter(function(d){return isPlaying(d)&&!d.handed&&d.vid})[0];
+  if(!a)return;
+  var dur=safe(a,'getDuration'),t=safe(a,'getCurrentTime');
+  if(!dur||t<3)return;
+  var lead=autoLead;
+  if(!IOS)lead=Math.max(lead,+$('#fadeDur').value);
+  if(dur-t<=lead+0.5)transition(1-a.i,true);
+}
 
 /* ---------- decks ---------- */
 function makeDeck(i){
@@ -315,6 +429,13 @@ function makeDeck(i){
       var playing=e.data===1;
       d.el.querySelector('[data-a="play"]').textContent=playing?'Pause':'Play';
       if(e.data===1||e.data===5){try{d.p.setPlaybackRate(d.rate)}catch(x){}}
+      if(e.data===1){
+        d.played=true;
+        for(var q=0;q<tracks.length;q++){if(tracks[q].id===d.vid){qIndex=q;break}}
+        if(pendingDest===d.i)pendingDest=null;
+        ensureQueued();
+      }
+      if(e.data===0&&autoMode!=='off'&&!d.handed)transition(1-d.i,true);
       applyVols();
     },
     onError:function(e){
@@ -355,7 +476,7 @@ function act(d,a){
   var p=d.p;
   if(a==='play'){
     if(!d.vid){status('Load a track onto this deck first.');return}
-    if(safe(d,'getPlayerState')===1)p.pauseVideo();else p.playVideo();
+    if(safe(d,'getPlayerState')===1)p.pauseVideo();else{d.handed=false;p.playVideo()}
   }
   else if(a==='back')p.seekTo(Math.max(0,safe(d,'getCurrentTime')-4),true);
   else if(a==='fwd')p.seekTo(safe(d,'getCurrentTime')+4,true);
@@ -407,7 +528,7 @@ function sync(d){
 function loadTrack(i,t){
   var d=decks[i];
   if(!d||!d.ready){status('That deck is still starting. Try again in a second.');return}
-  d.vid=t.id;d.cue=0;d.rate=1;d.r('rate').value='1';
+  d.vid=t.id;d.cue=0;d.rate=1;d.r('rate').value='1';d.played=false;d.handed=false;
   d.bpm=parseFloat(store.get('bpm:'+t.id,''))||0;
   d.r('bpm').value=d.bpm||'';
   d.r('title').textContent=t.title||t.id;
@@ -430,6 +551,7 @@ setInterval(function(){
       if(dur)d.r('seek').value=Math.round(t/dur*1000);
     }
   });
+  autoTick();
 },250);
 
 /* ---------- playlist ---------- */
@@ -533,6 +655,9 @@ function renderList(){
 /* ---------- boot ---------- */
 $('#plInput').value=store.get('pl','');
 $('#keyInput').value=store.get('key','');
+$('#autoMode').value=store.get('autoMode','off');autoMode=$('#autoMode').value||'off';
+$('#autoLead').value=store.get('autoLead','0');autoLead=+$('#autoLead').value||0;
+$('#startAt').value=store.get('startAt','cue');
 window.onYouTubeIframeAPIReady=function(){
   decks=[makeDeck(0),makeDeck(1)];
   applyVols();
