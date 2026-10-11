@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Mixer">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#111215">
+<title>Playlist Mixer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: two decks flank a narrow center mixer (crossfader, master, auto-fade); playlist sits below. Stacks on small screens. */
+:root{
+  --bg:#111215;
+  --panel:#191b20;
+  --panel-2:#20232a;
+  --line:#2c3039;
+  --fg:#ebe8e1;
+  --mute:#8c919c;
+  --a:#ff6b4a;
+  --b:#3fd0c9;
+  --display:'Barlow Condensed','Arial Narrow',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--mono);padding:20px 16px 48px}
+.wrap{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font:700 30px/1 var(--display);letter-spacing:.06em;text-transform:uppercase;margin:0}
+header{display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-end;justify-content:space-between}
+.setup{display:flex;flex-wrap:wrap;gap:8px;flex:1 1 520px;justify-content:flex-end}
+.setup input{min-width:0;flex:1 1 200px}
+input[type=text],input[type=password],input[type=number],select{
+  background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:8px 10px;font:inherit}
+input::placeholder{color:var(--mute)}
+button{background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:8px 12px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--mute)}
+button:active{transform:translateY(1px)}
+:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+button.primary{background:var(--fg);color:var(--bg);border-color:var(--fg);font-weight:500}
+#status{min-height:1.4em;color:var(--mute);font-size:13px}
+#status.err{color:var(--a)}
+.banner{border:1px solid var(--line);background:var(--panel);padding:10px 12px;border-radius:4px;color:var(--mute);font-size:13px}
+.banner code{color:var(--fg)}
+
+#stage{display:grid;grid-template-columns:1fr;gap:14px}
+@media(min-width:1000px){#stage{grid-template-columns:minmax(0,1fr) 250px minmax(0,1fr);align-items:start}}
+
+.deck{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:12px;--c:var(--a)}
+.deck[data-n="2"]{--c:var(--b)}
+.dhead{display:flex;gap:12px;align-items:center;min-width:0}
+.tag{font:700 44px/1 var(--display);color:var(--bg);background:var(--c);width:52px;height:52px;display:grid;place-items:center;border-radius:4px;flex:none}
+.meta{min-width:0}
+.title{font:600 20px/1.15 var(--display);letter-spacing:.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chan{color:var(--mute);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.screen{aspect-ratio:16/9;background:#000;border-radius:4px;overflow:hidden;border:1px solid var(--line)}
+.screen iframe,.screen>div{width:100%;height:100%;display:block}
+.times{display:flex;justify-content:space-between;color:var(--mute);font-size:12px;font-variant-numeric:tabular-nums}
+.times .cuepos{color:var(--c)}
+input[type=range]{width:100%;accent-color:var(--c);margin:6px 0}
+.transport,.tempo{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.transport .play{background:var(--c);border-color:var(--c);color:var(--bg);font-weight:500;min-width:84px}
+.label{color:var(--mute);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+.row{display:flex;align-items:center;gap:10px}
+.row .label{flex:none;width:44px}
+.tempo input[type=number]{width:78px}
+.eff{font-variant-numeric:tabular-nums;color:var(--c)}
+
+.mixer{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:16px}
+.cf{display:flex;flex-direction:column;gap:6px}
+.cf .ends{display:flex;justify-content:space-between;font:700 22px/1 var(--display)}
+.cf .ends span:first-child{color:var(--a)}.cf .ends span:last-child{color:var(--b)}
+#cross{accent-color:var(--fg);height:28px;margin:0}
+.gains{display:flex;justify-content:space-between;font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums}
+.stack{display:flex;flex-direction:column;gap:6px}
+
+.listbox{background:var(--panel);border:1px solid var(--line);border-radius:6px;display:flex;flex-direction:column}
+.listhead{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line)}
+.listhead input{flex:1 1 220px;max-width:420px}
+#list{max-height:420px;overflow:auto;margin:0;padding:0;list-style:none}
+#list li{display:flex;gap:10px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line)}
+#list li:last-child{border-bottom:0}
+#list .n{color:var(--mute);width:32px;text-align:right;flex:none;font-variant-numeric:tabular-nums}
+#list .t{flex:1;min-width:0}
+#list .t b{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#list .t small{color:var(--mute);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#list .ld{width:40px;padding:6px 0;font-weight:500}
+#list .ld[data-d="1"]{color:var(--a)}#list .ld[data-d="2"]{color:var(--b)}
+#list .ld.on[data-d="1"]{background:var(--a);color:var(--bg);border-color:var(--a)}
+#list .ld.on[data-d="2"]{background:var(--b);color:var(--bg);border-color:var(--b)}
+#list li.bad{opacity:.45}
+.empty{padding:26px 14px;color:var(--mute)}
+#helperHost{position:absolute;left:-9999px;top:0;width:200px;height:200px}
+button,input,select{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+body{padding-top:calc(20px + env(safe-area-inset-top,0px))}
+#iosNote{border:1px solid var(--line);background:var(--panel);padding:10px 12px;border-radius:4px;color:var(--mute);font-size:13px}
+.ios .cf,.ios .opt,.ios .lvl{display:none}
+
+/* Phone layout: playlist first, decks stacked, mixer pinned to the bottom edge */
+@media(max-width:999px){
+  body{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))}
+  input[type=text],input[type=password],input[type=number],select{font-size:16px;min-height:44px}
+  button{min-height:44px}
+  input[type=range]{height:34px}
+  header{align-items:flex-start}
+  h1{font-size:26px}
+  .setup{justify-content:stretch;flex-basis:100%}
+  .setup button{flex:1 1 100%}
+  .listbox{order:1}
+  #stage{order:2}
+  #list{max-height:260px}
+  #list .ld{width:52px;min-height:44px}
+  .transport{display:grid;grid-template-columns:repeat(4,1fr)}
+  .transport .play{grid-column:span 2}
+  .transport button{padding:8px 4px}
+  .tempo{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:8px}
+  .tempo .tempoact{grid-column:1/-1;display:flex;gap:8px}
+  .tempo .tempoact button{flex:1}
+  .tempo .eff{grid-column:1/-1}
+  .opt,.hint{display:none}
+  .mixer{position:fixed;left:0;right:0;bottom:0;z-index:20;border-radius:12px 12px 0 0;border-width:1px 0 0;
+    padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));gap:8px;box-shadow:0 -8px 24px rgba(0,0,0,.5)}
+  .cf{gap:2px}
+  .cf .ends{font-size:18px}
+  #cross{height:40px}
+  .fadebox{flex-direction:row;gap:8px}
+  .fadebox .label{display:none}
+  .fadebox select{flex:0 0 38%}
+  .fadebox button{flex:1}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Playlist Mixer</h1>
+    <div class="setup">
+      <input type="text" id="plInput" placeholder="YouTube playlist link or ID" autocomplete="off">
+      <input type="password" id="keyInput" placeholder="API key (optional, gives track titles)" autocomplete="off">
+      <button class="primary" id="loadBtn">Load playlist</button>
+    </div>
+  </header>
+  <div id="status">Paste your playlist link and press Load playlist. The playlist must be public or unlisted.</div>
+  <div id="iosNote" hidden>
+    iPhone and iPad do not let web pages change a video's volume, and they may stop one deck when the other starts. The crossfader is hidden here. Use Hand off: it starts the other deck and pauses this one after the fade time, so you can still blend by ear with the speed controls and your volume buttons.
+  </div>
+  <div class="banner" id="fileBanner" hidden>
+    You opened this as a file. If a deck shows a video error, run <code>python3 -m http.server 8000</code> in this folder and open <code>http://localhost:8000/playlist-mixer.html</code> instead.
+  </div>
+
+  <main id="stage">
+    <div id="deckHost1"></div>
+    <section class="mixer" aria-label="Mixer">
+      <div class="cf">
+        <span class="label">Crossfader</span>
+        <div class="ends"><span>A</span><span>B</span></div>
+        <input type="range" id="cross" min="0" max="1000" value="0" aria-label="Crossfader">
+        <div class="gains"><span id="gA">A 100%</span><span id="gB">B 0%</span></div>
+      </div>
+      <div class="stack opt">
+        <select id="curve" aria-label="Crossfader curve">
+          <option value="blend">Curve: blend (equal power)</option>
+          <option value="cut">Curve: fast cut</option>
+        </select>
+      </div>
+      <div class="stack opt">
+        <span class="label">Master</span>
+        <input type="range" id="master" min="0" max="100" value="100" aria-label="Master volume">
+      </div>
+      <div class="stack fadebox">
+        <span class="label" id="fadeLabel">Auto-fade</span>
+        <select id="fadeDur" aria-label="Fade length">
+          <option value="4">4 seconds</option>
+          <option value="8">8 seconds</option>
+          <option value="16" selected>16 seconds</option>
+          <option value="32">32 seconds</option>
+          <option value="64">64 seconds</option>
+        </select>
+        <button id="fadeBtn" class="primary">Fade to B</button>
+      </div>
+      <div class="gains hint" style="flex-direction:column;gap:2px">
+        <span>Left / Right arrows move the crossfader.</span>
+      </div>
+    </section>
+    <div id="deckHost2"></div>
+  </main>
+
+  <section class="listbox" aria-label="Playlist">
+    <div class="listhead">
+      <span class="label" id="count">Playlist</span>
+      <input type="text" id="filter" placeholder="Filter tracks" autocomplete="off">
+    </div>
+    <ul id="list"><li class="empty">No playlist loaded yet.</li></ul>
+  </section>
+</div>
+<div id="helperHost"></div>
+
+<script>
+(function(){
+'use strict';
+var $=function(s,r){return (r||document).querySelector(s)};
+var store={
+  get:function(k,d){try{var v=localStorage.getItem(k);return v===null?d:v}catch(e){return d}},
+  set:function(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+};
+var isWeb=/^https?:$/.test(location.protocol);
+var IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+if(IOS){document.documentElement.classList.add('ios');document.body.classList.add('ios');$('#iosNote').hidden=false;$('#fadeLabel').textContent='Hand off'}
+if(!isWeb) $('#fileBanner').hidden=false;
+
+var statusEl=$('#status');
+function status(msg,err){statusEl.textContent=msg;statusEl.className=err?'err':''}
+function fmt(s){s=Math.max(0,Math.floor(s||0));var m=Math.floor(s/60),r=s%60;return m+':'+(r<10?'0':'')+r}
+
+/* ---------- state ---------- */
+var tracks=[];
+var decks=[];
+var cross=0;          // 0 = deck A, 1 = deck B
+var master=1;
+var fadeRaf=null;
+
+/* ---------- deck markup ---------- */
+function deckHTML(n,L){
+  return '<section class="deck" id="deck'+n+'" data-n="'+n+'" aria-label="Deck '+L+'">'+
+  '<div class="dhead"><div class="tag">'+L+'</div><div class="meta"><div class="title" data-r="title">Empty deck</div><div class="chan" data-r="chan">Load a track from the playlist below</div></div></div>'+
+  '<div class="screen"><div id="yt'+n+'"></div></div>'+
+  '<div><input type="range" data-r="seek" min="0" max="1000" value="0" aria-label="Position, deck '+L+'">'+
+  '<div class="times"><span data-r="cur">0:00</span><span class="cuepos" data-r="cuepos"></span><span data-r="rem">-0:00</span></div></div>'+
+  '<div class="transport"><button class="play" data-a="play">Play</button>'+
+  '<button data-a="back" title="Back 4 seconds">-4s</button><button data-a="fwd" title="Forward 4 seconds">+4s</button>'+
+  '<button data-a="nudgeb" title="Nudge back 0.1 seconds">-0.1</button><button data-a="nudgef" title="Nudge forward 0.1 seconds">+0.1</button>'+
+  '<button data-a="setcue">Set cue</button><button data-a="gocue">Cue</button></div>'+
+  '<div class="row lvl"><span class="label">Level</span><input type="range" data-r="vol" min="0" max="100" value="100" aria-label="Level, deck '+L+'"></div>'+
+  '<div class="tempo"><span class="label">Speed</span><select data-r="rate" aria-label="Speed, deck '+L+'"><option value="1">1x</option></select>'+
+  '<span class="label">BPM</span><input type="number" data-r="bpm" min="40" max="220" step="0.1" placeholder="--" aria-label="Track BPM, deck '+L+'">'+
+  '<span class="tempoact"><button data-a="tap">Tap</button> <button data-a="sync">Sync</button></span>'+
+  '<span class="eff" data-r="eff"></span></div>'+
+  '</section>';
+}
+$('#deckHost1').outerHTML=deckHTML(1,'A');
+$('#deckHost2').outerHTML=deckHTML(2,'B');
+
+/* ---------- volume / crossfader ---------- */
+function gains(){
+  var x=cross,a,b;
+  if($('#curve').value==='cut'){a=Math.min(1,(1-x)*8);b=Math.min(1,x*8)}
+  else{a=Math.cos(x*Math.PI/2);b=Math.sin(x*Math.PI/2)}
+  return [a,b];
+}
+function applyVols(){
+  var g=gains();
+  $('#gA').textContent='A '+Math.round(g[0]*100)+'%';
+  $('#gB').textContent='B '+Math.round(g[1]*100)+'%';
+  $('#fadeBtn').textContent=(IOS?'Hand off to ':'Fade to ')+(cross<0.5?'B':'A');
+  if(IOS) return;
+  decks.forEach(function(d,i){
+    if(!d.ready) return;
+    try{d.p.setVolume(Math.round(100*(d.vol/100)*g[i]*master))}catch(e){}
+  });
+}
+function setCross(v){cross=Math.max(0,Math.min(1,v));$('#cross').value=Math.round(cross*1000);applyVols()}
+$('#cross').addEventListener('input',function(){cancelAnimationFrame(fadeRaf);cross=this.value/1000;applyVols()});
+$('#curve').addEventListener('change',applyVols);
+$('#master').addEventListener('input',function(){master=this.value/100;applyVols()});
+document.addEventListener('keydown',function(e){
+  var t=e.target&&e.target.tagName;
+  if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA') return;
+  if(e.key==='ArrowLeft'){setCross(cross-0.05);e.preventDefault()}
+  if(e.key==='ArrowRight'){setCross(cross+0.05);e.preventDefault()}
+});
+$('#fadeBtn').addEventListener('click',function(){
+  var dest=cross<0.5?1:0,from=cross,dur=+$('#fadeDur').value*1000,t0=performance.now();
+  var td=decks[dest];
+  if(td&&td.ready&&td.vid){try{if(td.p.getPlayerState()!==1)td.p.playVideo()}catch(e){}}
+  cancelAnimationFrame(fadeRaf);
+  if(IOS){
+    // No volume control on iOS: start the other deck, then pause this one when the fade time is up.
+    var od=decks[1-dest];
+    cross=dest;applyVols();
+    if(od&&od.ready){setTimeout(function(){try{od.p.pauseVideo()}catch(e){}},dur)}
+    status('Deck '+(dest?'B':'A')+' started. Deck '+(dest?'A':'B')+' pauses in '+Math.round(dur/1000)+' seconds.');
+    return;
+  }
+  function step(now){
+    var k=Math.min(1,(now-t0)/dur);
+    setCross(from+(dest-from)*k);
+    if(k<1)fadeRaf=requestAnimationFrame(step);
+  }
+  fadeRaf=requestAnimationFrame(step);
+});
+
+/* ---------- decks ---------- */
+function makeDeck(i){
+  var el=$('#deck'+(i+1));
+  var d={i:i,el:el,p:null,ready:false,vid:null,cue:0,bpm:0,rate:1,vol:100,dragging:false,taps:[],
+    r:function(k){return el.querySelector('[data-r="'+k+'"]')}};
+  var vars={playsinline:1,rel:0,modestbranding:1,disablekb:1,enablejsapi:1};
+  if(isWeb) vars.origin=location.origin;
+  d.p=new YT.Player('yt'+(i+1),{width:'100%',height:'100%',playerVars:vars,events:{
+    onReady:function(){
+      d.ready=true;
+      try{
+        var rates=d.p.getAvailablePlaybackRates()||[1];
+        var sel=d.r('rate');sel.innerHTML='';
+        rates.forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v+'x';if(v===1)o.selected=true;sel.appendChild(o)});
+      }catch(e){}
+      applyVols();
+    },
+    onStateChange:function(e){
+      var playing=e.data===1;
+      d.el.querySelector('[data-a="play"]').textContent=playing?'Pause':'Play';
+      if(e.data===1||e.data===5){try{d.p.setPlaybackRate(d.rate)}catch(x){}}
+      applyVols();
+    },
+    onError:function(e){
+      var code=e.data;
+      var why=(code===101||code===150||code===153)?'The uploader blocks embedding for this video.':
+              (code===100)?'This video is unavailable.':'The player could not load this video (error '+code+').';
+      status('Deck '+(i?'B':'A')+': '+why+' Pick another track.',true);
+      tracks.forEach(function(t){if(t.id===d.vid)t.bad=true});
+      renderList();
+    }
+  }});
+  d.el.addEventListener('click',function(e){
+    var b=e.target.closest('button[data-a]');if(!b)return;act(d,b.dataset.a);
+  });
+  d.r('seek').addEventListener('input',function(){
+    d.dragging=true;
+    var dur=safe(d,'getDuration');
+    d.r('cur').textContent=fmt(this.value/1000*dur);
+  });
+  d.r('seek').addEventListener('change',function(){
+    var dur=safe(d,'getDuration');
+    try{d.p.seekTo(this.value/1000*dur,true)}catch(e){}
+    d.dragging=false;
+  });
+  d.r('vol').addEventListener('input',function(){d.vol=+this.value;applyVols()});
+  d.r('rate').addEventListener('change',function(){d.rate=+this.value;try{d.p.setPlaybackRate(d.rate)}catch(e){}updateEff()});
+  d.r('bpm').addEventListener('input',function(){
+    d.bpm=parseFloat(this.value)||0;
+    if(d.vid)store.set('bpm:'+d.vid,d.bpm||'');
+    updateEff();
+  });
+  return d;
+}
+function safe(d,fn){try{return d.p[fn]()||0}catch(e){return 0}}
+
+function act(d,a){
+  if(!d.ready) return;
+  var p=d.p;
+  if(a==='play'){
+    if(!d.vid){status('Load a track onto this deck first.');return}
+    if(safe(d,'getPlayerState')===1)p.pauseVideo();else p.playVideo();
+  }
+  else if(a==='back')p.seekTo(Math.max(0,safe(d,'getCurrentTime')-4),true);
+  else if(a==='fwd')p.seekTo(safe(d,'getCurrentTime')+4,true);
+  else if(a==='nudgeb')p.seekTo(Math.max(0,safe(d,'getCurrentTime')-0.1),true);
+  else if(a==='nudgef')p.seekTo(safe(d,'getCurrentTime')+0.1,true);
+  else if(a==='setcue'){d.cue=safe(d,'getCurrentTime');d.r('cuepos').textContent='cue '+fmt(d.cue)}
+  else if(a==='gocue')p.seekTo(d.cue,true);
+  else if(a==='tap')tap(d);
+  else if(a==='sync')sync(d);
+}
+
+function tap(d){
+  var now=performance.now();
+  if(d.taps.length&&now-d.taps[d.taps.length-1]>2000)d.taps=[];
+  d.taps.push(now);
+  if(d.taps.length>8)d.taps.shift();
+  if(d.taps.length<3)return;
+  var span=(d.taps[d.taps.length-1]-d.taps[0])/(d.taps.length-1);
+  var heard=60000/span;                 // BPM you are hearing right now
+  d.bpm=Math.round(heard/d.rate*10)/10; // convert back to the track's own BPM
+  d.r('bpm').value=d.bpm;
+  if(d.vid)store.set('bpm:'+d.vid,d.bpm);
+  updateEff();
+}
+function effBpm(d){return d.bpm?d.bpm*d.rate:0}
+function updateEff(){
+  decks.forEach(function(d){
+    var e=effBpm(d);
+    d.r('eff').textContent=e?('= '+e.toFixed(1)+' BPM'):'';
+  });
+  if(decks[0]&&decks[1]&&effBpm(decks[0])&&effBpm(decks[1])){
+    var diff=effBpm(decks[0])-effBpm(decks[1]);
+    decks.forEach(function(d){d.r('eff').textContent+=' (gap '+Math.abs(diff).toFixed(1)+')'});
+  }
+}
+function sync(d){
+  var o=decks[1-d.i];
+  if(!d.bpm||!o.bpm){status('Set the BPM on both decks first (type it or use Tap).');return}
+  var target=effBpm(o),need=target/d.bpm;
+  var opts=[].slice.call(d.r('rate').options).map(function(x){return +x.value});
+  var best=opts.reduce(function(a,b){return Math.abs(b-need)<Math.abs(a-need)?b:a});
+  d.rate=best;d.r('rate').value=best;
+  try{d.p.setPlaybackRate(best)}catch(e){}
+  updateEff();
+  var left=Math.abs(effBpm(d)-target);
+  status('Deck '+(d.i?'B':'A')+' set to '+best+'x, '+left.toFixed(1)+' BPM from the other deck.'+(left>1.5?' Speed only moves in fixed steps, so nudge by ear.':''));
+}
+
+function loadTrack(i,t){
+  var d=decks[i];
+  if(!d||!d.ready){status('That deck is still starting. Try again in a second.');return}
+  d.vid=t.id;d.cue=0;d.rate=1;d.r('rate').value='1';
+  d.bpm=parseFloat(store.get('bpm:'+t.id,''))||0;
+  d.r('bpm').value=d.bpm||'';
+  d.r('title').textContent=t.title||t.id;
+  d.r('chan').textContent=t.channel||'';
+  d.r('cuepos').textContent='';
+  try{d.p.cueVideoById(t.id)}catch(e){}
+  d.r('seek').value=0;
+  updateEff();renderList();
+  status('Deck '+(i?'B':'A')+' ready. Press Play when you want it.');
+}
+
+/* ---------- time display ---------- */
+setInterval(function(){
+  decks.forEach(function(d){
+    if(!d.ready||!d.vid)return;
+    var t=safe(d,'getCurrentTime'),dur=safe(d,'getDuration');
+    if(!d.dragging){
+      d.r('cur').textContent=fmt(t);
+      d.r('rem').textContent='-'+fmt(Math.max(0,dur-t));
+      if(dur)d.r('seek').value=Math.round(t/dur*1000);
+    }
+  });
+},250);
+
+/* ---------- playlist ---------- */
+function parseId(s){
+  s=(s||'').trim();if(!s)return '';
+  var m=s.match(/[?&]list=([A-Za-z0-9_-]+)/);
+  if(m)return m[1];
+  return /^[A-Za-z0-9_-]{10,}$/.test(s)?s:'';
+}
+async function fetchViaApi(id,key){
+  var out=[],token='';
+  do{
+    var u='https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&maxResults=50&playlistId='+encodeURIComponent(id)+'&key='+encodeURIComponent(key)+(token?'&pageToken='+token:'');
+    var r=await fetch(u),j=await r.json();
+    if(j.error)throw new Error('YouTube API: '+j.error.message);
+    j.items.forEach(function(it){
+      var s=it.snippet;
+      if(s.title==='Private video'||s.title==='Deleted video')return;
+      out.push({id:it.contentDetails.videoId,title:s.title,channel:(s.videoOwnerChannelTitle||'').replace(/ - Topic$/,'')});
+    });
+    token=j.nextPageToken||'';
+  }while(token);
+  return out;
+}
+function readViaPlayer(id){
+  return new Promise(function(res,rej){
+    var host=document.createElement('div');host.id='helper';$('#helperHost').appendChild(host);
+    var done=false,iv,hp;
+    function finish(fn,v){if(done)return;done=true;clearInterval(iv);try{hp.destroy()}catch(e){}fn(v)}
+    hp=new YT.Player('helper',{width:200,height:200,playerVars:{listType:'playlist',list:id,playsinline:1},events:{
+      onError:function(){finish(rej,new Error('YouTube would not open that playlist. Make sure it is public or unlisted, or add an API key.'))}
+    }});
+    var tries=0;
+    iv=setInterval(function(){
+      tries++;var l=null;
+      try{l=hp.getPlaylist&&hp.getPlaylist()}catch(e){}
+      if(l&&l.length)finish(res,l.map(function(v){return{id:v,title:v,channel:''}}));
+      else if(tries>40)finish(rej,new Error('Timed out reading the playlist.'));
+    },500);
+  });
+}
+async function fillTitles(){
+  for(var k=0;k<tracks.length;k+=6){
+    var chunk=tracks.slice(k,k+6);
+    await Promise.all(chunk.map(async function(t){
+      try{
+        var r=await fetch('https://noembed.com/embed?url='+encodeURIComponent('https://www.youtube.com/watch?v='+t.id));
+        var j=await r.json();
+        if(j.title){t.title=j.title;t.channel=(j.author_name||'').replace(/ - Topic$/,'')}
+      }catch(e){}
+    }));
+    renderList();
+  }
+}
+async function loadPlaylist(){
+  var id=parseId($('#plInput').value);
+  if(!id){status('Paste a playlist link or a playlist ID.',true);return}
+  var key=$('#keyInput').value.trim();
+  store.set('pl',$('#plInput').value.trim());store.set('key',key);
+  status('Loading playlist...');
+  try{
+    tracks=key?await fetchViaApi(id,key):await readViaPlayer(id);
+    renderList();
+    status(tracks.length+' tracks loaded. Use the A and B buttons to put a track on a deck.');
+    if(!key)fillTitles();
+  }catch(e){status(e.message,true)}
+}
+$('#loadBtn').addEventListener('click',loadPlaylist);
+$('#plInput').addEventListener('keydown',function(e){if(e.key==='Enter')loadPlaylist()});
+$('#filter').addEventListener('input',renderList);
+
+function renderList(){
+  var ul=$('#list'),q=$('#filter').value.trim().toLowerCase();
+  $('#count').textContent=tracks.length?('Playlist, '+tracks.length+' tracks'):'Playlist';
+  ul.innerHTML='';
+  if(!tracks.length){ul.innerHTML='<li class="empty">No playlist loaded yet.</li>';return}
+  var shown=0;
+  tracks.forEach(function(t,idx){
+    if(q&&(t.title+' '+t.channel).toLowerCase().indexOf(q)<0)return;
+    shown++;
+    var li=document.createElement('li');if(t.bad)li.className='bad';
+    var n=document.createElement('span');n.className='n';n.textContent=idx+1;
+    var tx=document.createElement('div');tx.className='t';
+    var b=document.createElement('b');b.textContent=t.title;
+    var s=document.createElement('small');s.textContent=(t.channel||'')+(t.bad?' (blocked)':'');
+    tx.appendChild(b);tx.appendChild(s);
+    li.appendChild(n);li.appendChild(tx);
+    [1,2].forEach(function(dn){
+      var btn=document.createElement('button');
+      btn.className='ld'+(decks[dn-1]&&decks[dn-1].vid===t.id?' on':'');
+      btn.dataset.d=dn;btn.textContent=dn===1?'A':'B';
+      btn.setAttribute('aria-label','Load on deck '+btn.textContent+': '+t.title);
+      btn.addEventListener('click',function(){loadTrack(dn-1,t)});
+      li.appendChild(btn);
+    });
+    ul.appendChild(li);
+  });
+  if(!shown)ul.innerHTML='<li class="empty">No tracks match that filter.</li>';
+}
+
+/* ---------- boot ---------- */
+$('#plInput').value=store.get('pl','');
+$('#keyInput').value=store.get('key','');
+window.onYouTubeIframeAPIReady=function(){
+  decks=[makeDeck(0),makeDeck(1)];
+  applyVols();
+  if($('#plInput').value&&$('#keyInput').value)loadPlaylist();
+};
+var s=document.createElement('script');
+s.src='https://www.youtube.com/iframe_api';
+s.onerror=function(){status('Could not reach YouTube. Check your internet connection.',true)};
+document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>
